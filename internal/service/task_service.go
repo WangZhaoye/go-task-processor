@@ -114,3 +114,13 @@ func FinishTask(id uuid.UUID, result string, status model.TaskStatus) error {
 			"updated_at": time.Now(),
 		}).Error
 }
+
+func UpdateTaskRetryCount(id uuid.UUID, retryCount int) error {
+	return db.DB.
+		Model(&model.Task{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"retry_count": retryCount,
+			"updated_at":  time.Now(),
+		}).Error
+}
