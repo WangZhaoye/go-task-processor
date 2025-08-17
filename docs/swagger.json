@@ -1,0 +1,105 @@
+{
+    "schemes": [
+        "http"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "This is a task async processing API.",
+        "title": "Go Task Processor API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/tasks": {
+            "post": {
+                "description": "Submit a task to be processed asynchronously",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Create a new task",
+                "parameters": [
+                    {
+                        "description": "Task",
+                        "name": "task",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.Task"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "model.Task": {
+            "type": "object",
+            "properties": {
+                "Type": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.TaskStatus"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.TaskStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "running",
+                "success",
+                "failed"
+            ],
+            "x-enum-varnames": [
+                "StatusPending",
+                "StatusRunning",
+                "StatusSuccess",
+                "StatusFalied"
+            ]
+        }
+    }
+}

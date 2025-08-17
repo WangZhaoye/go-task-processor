@@ -1,0 +1,71 @@
+basePath: /
+definitions:
+  model.Task:
+    properties:
+      Type:
+        type: string
+      createdAt:
+        type: string
+      id:
+        type: string
+      payload:
+        type: string
+      result:
+        type: string
+      status:
+        $ref: '#/definitions/model.TaskStatus'
+      updatedAt:
+        type: string
+    type: object
+  model.TaskStatus:
+    enum:
+    - pending
+    - running
+    - success
+    - failed
+    type: string
+    x-enum-varnames:
+    - StatusPending
+    - StatusRunning
+    - StatusSuccess
+    - StatusFalied
+host: localhost:8080
+info:
+  contact: {}
+  description: This is a task async processing API.
+  title: Go Task Processor API
+  version: "1.0"
+paths:
+  /tasks:
+    post:
+      consumes:
+      - application/json
+      description: Submit a task to be processed asynchronously
+      parameters:
+      - description: Task
+        in: body
+        name: task
+        required: true
+        schema:
+          $ref: '#/definitions/model.Task'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new task
+      tags:
+      - tasks
+schemes:
+- http
+swagger: "2.0"

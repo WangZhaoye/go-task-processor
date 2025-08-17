@@ -19,6 +19,16 @@ type TaskRequest struct {
 	Payload string `json:"payload" binding:"required"`
 }
 
+// CreateTask godoc
+// @Summary Create a new task
+// @Description Submit a task to be processed asynchronously
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param task body model.Task true "Task"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Router /tasks [post]
 func CreateTask(c *gin.Context) {
 	var req TaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
