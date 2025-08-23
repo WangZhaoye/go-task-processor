@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/WangZhaoye/go-task-processor/internal/cache"
 	"github.com/WangZhaoye/go-task-processor/internal/db"
 	"github.com/WangZhaoye/go-task-processor/internal/model"
 	"github.com/WangZhaoye/go-task-processor/internal/mq"
@@ -14,7 +15,6 @@ import (
 )
 
 type TaskRequest struct {
-	Id      string `json:"id" binding:"omitempty,uuid4"`
 	Type    string `json:"type" binding:"required"`
 	Payload string `json:"payload" binding:"required"`
 }
@@ -36,17 +36,9 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 
-	var id uuid.UUID
-	if req.Id == "" {
-		id = uuid.New()
-	} else {
-		var err error
-		id, err = uuid.Parse(req.Id)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid UUID format for id"})
-			return
-		}
-	}
+	// 总是生成新的UUID
+	id := uuid.New()
+	
 	task := model.Task{
 		ID:        id,
 		Type:      req.Type,
@@ -62,6 +54,17 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 	fmt.Println("✅ create task in DB ")
+
+	// 缓存新创建的任务
+	if err := cache.CacheTask(task.ID.String(), task); err != nil {
+		fmt.Printf("⚠️ Failed to cache task: %v\n", err)
+		// 缓存失败不影响主流程
+	}
+
+	// 缓存任务状态
+	if err := cache.CacheTaskStatus(task.ID.String(), string(task.Status)); err != nil {
+		fmt.Printf("⚠️ Failed to cache task status: %v\n", err)
+	}
 
 	//push to MQ
 	taskJson, _ := json.Marshal(task)
@@ -81,46 +84,103 @@ func GetTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Task not found"})
 		return
 	}
+
 	var task model.Task
+
+	// 先尝试从缓存获取
+	found, err := cache.GetCachedTask(id, &task)
+	if err != nil {
+		fmt.Printf("⚠️ Cache error: %v\n", err)
+		// 缓存错误，继续从数据库查询
+	} else if found {
+		fmt.Println("✅ get task from cache")
+		c.JSON(http.StatusOK, task)
+		return
+	}
+
+	// 缓存未命中，从数据库查询
 	if err := db.DB.First(&task, "id = ?", uuidVal).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
 	fmt.Println("✅ get task from DB")
+
+	// 将查询结果缓存起来
+	if err := cache.CacheTask(id, task); err != nil {
+		fmt.Printf("⚠️ Failed to cache task after DB query: %v\n", err)
+	}
+
 	c.JSON(http.StatusOK, task)
 }
 
+// TaskUpdateOptions 定义任务更新选项
+type TaskUpdateOptions struct {
+	Status     *model.TaskStatus `json:"status,omitempty"`
+	Result     *string           `json:"result,omitempty"`
+	RetryCount *int              `json:"retry_count,omitempty"`
+}
+
+// UpdateTask 通用的任务更新方法，支持选择性更新字段
+func UpdateTask(id uuid.UUID, options TaskUpdateOptions) error {
+	updateFields := map[string]interface{}{
+		"updated_at": time.Now(),
+	}
+
+	// 根据选项添加需要更新的字段
+	if options.Status != nil {
+		updateFields["status"] = *options.Status
+	}
+	if options.Result != nil {
+		updateFields["result"] = *options.Result
+	}
+	if options.RetryCount != nil {
+		updateFields["retry_count"] = *options.RetryCount
+	}
+
+	// 执行数据库更新
+	err := db.DB.
+		Model(&model.Task{}).
+		Where("id = ?", id).
+		Updates(updateFields).
+		Error
+
+	if err != nil {
+		return err
+	}
+
+	// 更新缓存中的任务状态（如果状态有变化）
+	if options.Status != nil {
+		if statusErr := cache.CacheTaskStatus(id.String(), string(*options.Status)); statusErr != nil {
+			fmt.Printf("⚠️ Failed to update cached task status: %v\n", statusErr)
+		}
+	}
+
+	// 删除完整任务缓存，强制下次查询时重新从数据库获取最新数据
+	if cacheErr := cache.InvalidateTaskCache(id.String()); cacheErr != nil {
+		fmt.Printf("⚠️ Failed to invalidate task cache: %v\n", cacheErr)
+	}
+
+	return nil
+}
+
+// UpdateTaskStatus 更新任务状态（保持向后兼容）
 func UpdateTaskStatus(id uuid.UUID, status model.TaskStatus) error {
-	return db.DB. // 1. 从全局 DB 变量开始操作（GORM 的 *gorm.DB 实例）
-
-			Model(&model.Task{}). // 2. 指定要操作的表（根据 Task 模型）
-
-			Where("id = ?", id). // 3. 添加 SQL 条件：WHERE id = '具体的UUID值'
-
-			Updates(map[string]interface{}{ // 4. 更新多列
-			"status":     status,     // 更新 status 列
-			"updated_at": time.Now(), // 更新 updated_at 列为当前时间
-		}).
-		Error // 5. 返回执行过程中的错误（nil 表示成功）
+	return UpdateTask(id, TaskUpdateOptions{
+		Status: &status,
+	})
 }
 
+// FinishTask 完成任务（保持向后兼容）
 func FinishTask(id uuid.UUID, result string, status model.TaskStatus) error {
-	return db.DB.
-		Model(&model.Task{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"status":     status,
-			"result":     result,
-			"updated_at": time.Now(),
-		}).Error
+	return UpdateTask(id, TaskUpdateOptions{
+		Status: &status,
+		Result: &result,
+	})
 }
 
+// UpdateTaskRetryCount 更新任务重试次数（保持向后兼容）
 func UpdateTaskRetryCount(id uuid.UUID, retryCount int) error {
-	return db.DB.
-		Model(&model.Task{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"retry_count": retryCount,
-			"updated_at":  time.Now(),
-		}).Error
+	return UpdateTask(id, TaskUpdateOptions{
+		RetryCount: &retryCount,
+	})
 }
